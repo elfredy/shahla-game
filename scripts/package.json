@@ -1,0 +1,16 @@
+{
+  "name": "parse-script",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "parse": "tsx parse-and-upload.ts"
+  },
+  "dependencies": {
+    "mammoth": "^1.6.0",
+    "firebase": "^10.7.0",
+    "tsx": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
