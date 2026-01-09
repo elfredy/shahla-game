@@ -47,7 +47,7 @@ export default function Admin() {
     <div style={styles.container}>
       <header style={styles.header}>
         <h1 style={styles.title}>Admin Paneli</h1>
-        <a href="/" style={styles.backLink}>← Ana Səhifə</a>
+        <a href="/" style={styles.backLink} className="back-link">← Ana Səhifə</a>
       </header>
 
       <main style={styles.main}>
@@ -101,6 +101,7 @@ export default function Admin() {
               type="submit"
               disabled={loading}
               style={styles.submitButton}
+              className="submit-button"
             >
               {loading ? 'Yüklənir...' : 'Əlavə Et'}
             </button>
@@ -114,52 +115,69 @@ export default function Admin() {
 const styles: { [key: string]: React.CSSProperties } = {
   container: {
     minHeight: '100vh',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     padding: '20px',
+    position: 'relative',
+    zIndex: 1,
   },
   header: {
     textAlign: 'center',
     marginBottom: '30px',
+    position: 'relative',
+    zIndex: 1,
+    paddingTop: '20px',
   },
   title: {
-    fontSize: 'clamp(32px, 6vw, 48px)',
-    fontWeight: 'bold',
-    color: '#fff',
-    textShadow: '2px 2px 4px rgba(0,0,0,0.3)',
     marginBottom: '20px',
+    padding: '0',
   },
   backLink: {
     color: '#fff',
     fontSize: '18px',
     textDecoration: 'underline',
-    opacity: 0.9,
+    opacity: 0.95,
+    fontWeight: '600',
+    transition: 'opacity 0.2s',
+    display: 'inline-block',
+    marginTop: '10px',
+    textShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
   },
   main: {
     maxWidth: '600px',
     margin: '0 auto',
+    position: 'relative',
+    zIndex: 1,
   },
   formContainer: {
-    background: 'rgba(255, 255, 255, 0.95)',
-    borderRadius: '20px',
-    padding: '30px',
-    boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+    background: 'rgba(255, 255, 255, 0.98)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    borderRadius: '24px',
+    padding: '35px',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
   },
   formTitle: {
-    fontSize: '28px',
-    marginBottom: '25px',
+    fontSize: 'clamp(24px, 5vw, 32px)',
+    marginBottom: '30px',
     textAlign: 'center',
-    color: '#667eea',
-    fontWeight: 'bold',
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    fontWeight: '700',
+    letterSpacing: '0.5px',
   },
   message: {
-    padding: '15px',
-    borderRadius: '10px',
-    marginBottom: '20px',
+    padding: '16px 20px',
+    borderRadius: '12px',
+    marginBottom: '25px',
     textAlign: 'center',
     fontSize: '16px',
-    fontWeight: 'bold',
-    background: '#e8f5e9',
+    fontWeight: '600',
+    background: 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)',
     color: '#2e7d32',
+    boxShadow: '0 4px 15px rgba(46, 125, 50, 0.2)',
+    border: '1px solid rgba(46, 125, 50, 0.2)',
   },
   form: {
     display: 'flex',
@@ -173,27 +191,32 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   label: {
     fontSize: '16px',
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '600',
+    color: '#1e3c72',
+    marginBottom: '8px',
+    letterSpacing: '0.3px',
   },
   input: {
-    padding: '15px',
-    borderRadius: '10px',
-    border: '2px solid #ddd',
+    padding: '16px 18px',
+    borderRadius: '12px',
+    border: '2px solid rgba(30, 60, 114, 0.2)',
     fontSize: '16px',
-    transition: 'border-color 0.2s',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    fontFamily: 'inherit',
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
   },
   submitButton: {
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)',
     color: '#fff',
     border: 'none',
-    borderRadius: '12px',
-    padding: '15px',
+    borderRadius: '14px',
+    padding: '16px',
     fontSize: '18px',
-    fontWeight: 'bold',
+    fontWeight: '700',
     cursor: 'pointer',
-    transition: 'transform 0.2s',
-    boxShadow: '0 5px 15px rgba(0,0,0,0.2)',
-    marginTop: '10px',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '0 8px 25px rgba(30, 60, 114, 0.4)',
+    marginTop: '15px',
+    letterSpacing: '0.5px',
   },
 };
