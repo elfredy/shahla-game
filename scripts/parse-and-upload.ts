@@ -21,9 +21,10 @@ interface WordData {
   german: string;
   azerbaijani: string;
   chapter: string;
+  level: string;
 }
 
-async function parseWordDocument(filePath: string): Promise<WordData[]> {
+async function parseWordDocument(filePath: string, level: string): Promise<WordData[]> {
   const result = await mammoth.extractRawText({ path: filePath });
   const text = result.value;
   
@@ -52,7 +53,8 @@ async function parseWordDocument(filePath: string): Promise<WordData[]> {
         words.push({
           german,
           azerbaijani,
-          chapter: currentChapter
+          chapter: currentChapter,
+          level
         });
         continue;
       }
@@ -68,7 +70,8 @@ async function parseWordDocument(filePath: string): Promise<WordData[]> {
         words.push({
           german,
           azerbaijani,
-          chapter: currentChapter
+          chapter: currentChapter,
+          level
         });
       }
     }
@@ -90,7 +93,8 @@ async function uploadToFirebase(words: WordData[]) {
       await addDoc(collection(db, 'words'), {
         german: word.german,
         azerbaijani: word.azerbaijani,
-        chapter: word.chapter
+        chapter: word.chapter,
+        level: word.level
       });
       successCount++;
       if (successCount % 100 === 0) {
@@ -141,29 +145,41 @@ async function uploadToFirebase(words: WordData[]) {
 }
 
 async function main() {
-  // Try to find the file in current directory or parent directory
-  let docxPath = path.join(process.cwd(), 'kontext b1 word.docx');
-  if (!fs.existsSync(docxPath)) {
-    docxPath = path.join(process.cwd(), '..', 'kontext b1 word.docx');
-  }
-  if (!fs.existsSync(docxPath)) {
-    // Try in scripts directory
-    docxPath = path.join(__dirname, '..', 'kontext b1 word.docx');
-  }
+  // Get level from command line argument or default to B1
+  const level = process.argv[2] || 'B1';
   
-  if (!fs.existsSync(docxPath)) {
-    console.error(`Error: File not found. Searched in:`);
-    console.error(`  - ${path.join(process.cwd(), 'kontext b1 word.docx')}`);
-    console.error(`  - ${path.join(process.cwd(), '..', 'kontext b1 word.docx')}`);
-    console.error(`  - ${path.join(__dirname, '..', 'kontext b1 word.docx')}`);
-    console.log('\nPlease make sure the Word document "kontext b1 word.docx" is in the project root directory.');
+  if (!['A2', 'B1'].includes(level)) {
+    console.error('Error: Level must be A2 or B1');
+    console.log('Usage: npm run parse [A2|B1]');
+    console.log('Example: npm run parse A2');
     process.exit(1);
   }
   
+  // Try to find the file based on level
+  const fileName = level === 'A2' ? 'A2 Level.docx' : 'kontext b1 word.docx';
+  let docxPath = path.join(process.cwd(), fileName);
+  if (!fs.existsSync(docxPath)) {
+    docxPath = path.join(process.cwd(), '..', fileName);
+  }
+  if (!fs.existsSync(docxPath)) {
+    // Try in scripts directory
+    docxPath = path.join(__dirname, '..', fileName);
+  }
+  
+  if (!fs.existsSync(docxPath)) {
+    console.error(`Error: File not found. Searched for: ${fileName}`);
+    console.error(`  - ${path.join(process.cwd(), fileName)}`);
+    console.error(`  - ${path.join(process.cwd(), '..', fileName)}`);
+    console.error(`  - ${path.join(__dirname, '..', fileName)}`);
+    console.log(`\nPlease make sure the Word document "${fileName}" is in the project root directory.`);
+    process.exit(1);
+  }
+  
+  console.log(`Level: ${level}`);
   console.log(`Found file at: ${docxPath}`);
   
   console.log('Parsing Word document...');
-  const words = await parseWordDocument(docxPath);
+  const words = await parseWordDocument(docxPath, level);
   
   console.log(`\nFound ${words.length} words in ${new Set(words.map(w => w.chapter)).size} chapters`);
   console.log('\nSample words:');

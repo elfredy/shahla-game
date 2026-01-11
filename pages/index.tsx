@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Chapter, Word } from '@/types';
+import { Chapter, Word, Level } from '@/types';
+
+const LEVELS: Level[] = [
+  { id: 'A2', name: 'A2 Level' },
+  { id: 'B1', name: 'B1 Level' },
+];
 
 export default function Home() {
+  const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [currentWord, setCurrentWord] = useState<Word | null>(null);
@@ -17,13 +23,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadChapters();
+    // Load levels on mount - no need to load chapters until level is selected
+    setLoading(false);
   }, []);
 
-  const loadChapters = async () => {
+  const loadChapters = async (level: string) => {
+    setLoading(true);
     try {
       const wordsRef = collection(db, 'words');
-      const snapshot = await getDocs(wordsRef);
+      const q = query(wordsRef, where('level', '==', level));
+      const snapshot = await getDocs(q);
       
       const wordsData: Word[] = [];
       snapshot.forEach((doc) => {
@@ -61,6 +70,13 @@ export default function Home() {
     }
   };
 
+  const handleLevelSelect = (levelId: string) => {
+    setSelectedLevel(levelId);
+    setGameStarted(false);
+    setSelectedChapter(null);
+    loadChapters(levelId);
+  };
+
   const startGame = (chapterId: string) => {
     setSelectedChapter(chapterId);
     setGameStarted(true);
@@ -79,7 +95,7 @@ export default function Home() {
     const randomWord = chapter.words[Math.floor(Math.random() * chapter.words.length)];
     setCurrentWord(randomWord);
 
-    // Get 2 random wrong answers from other words
+    // Get 2 random wrong answers from other words in the same level
     const allOtherWords = chapters.flatMap((ch) => 
       ch.id !== chapterId ? ch.words : []
     );
@@ -128,6 +144,12 @@ export default function Home() {
     setIsCorrect(null);
     setScore(0);
     setTotalQuestions(0);
+  };
+
+  const resetToLevelSelection = () => {
+    setSelectedLevel(null);
+    setChapters([]);
+    resetGame();
   };
 
   if (loading) {
@@ -216,9 +238,30 @@ export default function Home() {
       </header>
 
       <main style={styles.main}>
-        {!gameStarted ? (
+        {!selectedLevel ? (
+          <div style={styles.levelSelection}>
+            <h2 style={styles.sectionTitle}>Level Seçin</h2>
+            <div style={styles.levelGrid}>
+              {LEVELS.map((level) => (
+                <button
+                  key={level.id}
+                  onClick={() => handleLevelSelect(level.id)}
+                  style={styles.levelButton}
+                  className="level-button"
+                >
+                  <div style={styles.levelName}>{level.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : !gameStarted ? (
           <div style={styles.chapterSelection}>
-            <h2 style={styles.sectionTitle}>Kapitel Seçin</h2>
+            <div style={styles.chapterHeader}>
+              <button onClick={resetToLevelSelection} style={styles.backButton} className="back-button">
+                ← Level Seçimi
+              </button>
+              <h2 style={styles.sectionTitle}>{selectedLevel} Level - Kapitel Seçin</h2>
+            </div>
             {chapters.length === 0 ? (
               <div style={styles.noChaptersContainer}>
                 <p style={styles.noChaptersText}>
@@ -347,6 +390,54 @@ const styles: { [key: string]: React.CSSProperties } = {
     padding: '30px',
     boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
     border: '1px solid rgba(255, 255, 255, 0.3)',
+  },
+  levelSelection: {
+    background: 'rgba(255, 255, 255, 0.98)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    borderRadius: '24px',
+    padding: '40px',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+  },
+  levelGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gap: '20px',
+    marginTop: '20px',
+  },
+  levelButton: {
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)',
+    border: 'none',
+    borderRadius: '20px',
+    padding: '35px 25px',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '0 10px 30px rgba(30, 60, 114, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1) inset',
+    color: '#fff',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  levelName: {
+    fontSize: 'clamp(24px, 4vw, 32px)',
+    fontWeight: '700',
+    textAlign: 'center',
+    letterSpacing: '1px',
+  },
+  chapterHeader: {
+    marginBottom: '25px',
+  },
+  backButton: {
+    background: 'transparent',
+    border: '2px solid rgba(30, 60, 114, 0.3)',
+    borderRadius: '10px',
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#1e3c72',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    marginBottom: '15px',
   },
   sectionTitle: {
     fontSize: 'clamp(26px, 5vw, 36px)',

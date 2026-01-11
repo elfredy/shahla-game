@@ -120,8 +120,18 @@ input:hover {
 }
 
 .submit-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 35px rgba(30, 60, 114, 0.5) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(30, 60, 114, 0.5) !important;
+}
+
+.level-button:hover {
+  transform: translateY(-5px) scale(1.02) !important;
+  box-shadow: 0 15px 40px rgba(30, 60, 114, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.2) inset !important;
+}
+
+.back-button:hover {
+  background: rgba(30, 60, 114, 0.1) !important;
+  border-color: rgba(30, 60, 114, 0.5) !important;
 }
 
 

@@ -6,12 +6,13 @@ export default function Admin() {
   const [german, setGerman] = useState('');
   const [azerbaijani, setAzerbaijani] = useState('');
   const [chapter, setChapter] = useState('');
+  const [level, setLevel] = useState('B1');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!german || !azerbaijani || !chapter) {
+    if (!german || !azerbaijani || !chapter || !level) {
       setMessage('Zəhmət olmasa bütün sahələri doldurun!');
       return;
     }
@@ -23,13 +24,15 @@ export default function Admin() {
       await addDoc(collection(db, 'words'), {
         german: german.trim(),
         azerbaijani: azerbaijani.trim(),
-        chapter: chapter.trim()
+        chapter: chapter.trim(),
+        level: level.trim()
       });
 
       setMessage('✓ Söz uğurla əlavə edildi!');
       setGerman('');
       setAzerbaijani('');
       setChapter('');
+      setLevel('B1');
     } catch (error: any) {
       console.error('Error adding word:', error);
       if (error?.code === 'permission-denied' || error?.message?.includes('PERMISSION_DENIED')) {
@@ -61,6 +64,19 @@ export default function Admin() {
           )}
 
           <form onSubmit={handleSubmit} style={styles.form}>
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Level:</label>
+              <select
+                value={level}
+                onChange={(e) => setLevel(e.target.value)}
+                style={styles.input}
+                required
+              >
+                <option value="A2">A2 Level</option>
+                <option value="B1">B1 Level</option>
+              </select>
+            </div>
+
             <div style={styles.inputGroup}>
               <label style={styles.label}>Kapitel:</label>
               <input
