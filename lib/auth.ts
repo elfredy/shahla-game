@@ -4,19 +4,21 @@ export interface UserSession {
   email: string;
   accessCode: string;
   loggedIn: boolean;
+  deviceFingerprint?: string;
 }
 
 const STORAGE_KEY = 'words_game_session';
 
 export const authService = {
   // Save session to localStorage
-  saveSession(email: string, accessCode: string): void {
+  saveSession(email: string, accessCode: string, deviceFingerprint?: string): void {
     if (typeof window === 'undefined') return;
     
     const session: UserSession = {
       email,
       accessCode,
-      loggedIn: true
+      loggedIn: true,
+      deviceFingerprint
     };
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));

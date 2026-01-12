@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { authService } from '@/lib/auth';
+import { deviceTracking } from '@/lib/deviceTracking';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 
@@ -46,8 +47,22 @@ export default function Login() {
         return;
       }
 
+      // Get device info
+      const deviceInfo = deviceTracking.getDeviceInfo();
+      const currentFingerprint = deviceInfo.deviceFingerprint;
+
+      // Check if device is allowed (first time login or same device)
+      if (!deviceTracking.isDeviceAllowed(email.toLowerCase().trim(), currentFingerprint)) {
+        setMessage('✗ Bu email ünvanı başqa bir cihazda aktivdir. Yalnız bir cihazdan giriş edə bilərsiniz.');
+        setLoading(false);
+        return;
+      }
+
+      // Store device fingerprint
+      deviceTracking.storeFingerprint(email.toLowerCase().trim(), currentFingerprint);
+
       // Save session
-      authService.saveSession(email.toLowerCase().trim(), accessCode.trim());
+      authService.saveSession(email.toLowerCase().trim(), accessCode.trim(), currentFingerprint);
       
       setMessage('✓ Giriş uğurlu! Yönləndirilirsiniz...');
       

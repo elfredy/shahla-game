@@ -3,6 +3,7 @@ import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Chapter, Word, Level } from '@/types';
 import { authService } from '@/lib/auth';
+import { deviceTracking } from '@/lib/deviceTracking';
 import { useRouter } from 'next/router';
 import Link from 'next/link';
 
@@ -34,6 +35,19 @@ export default function Home() {
       if (authService.isLoggedIn()) {
         const session = authService.getSession();
         if (session) {
+          // Verify device fingerprint
+          const deviceInfo = deviceTracking.getDeviceInfo();
+          const currentFingerprint = deviceInfo.deviceFingerprint;
+          
+          if (session.deviceFingerprint && session.deviceFingerprint !== currentFingerprint) {
+            // Device changed, logout
+            authService.logout();
+            setIsAuthenticated(false);
+            setCheckingAuth(false);
+            setLoading(false);
+            return;
+          }
+
           // Verify session with Firebase
           try {
             const subscriptionsRef = collection(db, 'subscriptions');
