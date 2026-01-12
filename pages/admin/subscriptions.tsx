@@ -446,12 +446,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     cursor: 'pointer',
     transition: 'all 0.2s',
   },
-  loading: {
-    textAlign: 'center',
-    padding: '40px',
-    fontSize: '18px',
-    color: '#666',
-  },
   logoutButton: {
     background: 'transparent',
     border: '2px solid rgba(255, 255, 255, 0.4)',
