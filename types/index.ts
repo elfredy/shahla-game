@@ -16,3 +16,13 @@ export interface Level {
   id: string;
   name: string;
 }
+
+export interface Subscription {
+  id: string;
+  email: string;
+  status: 'pending' | 'approved' | 'rejected';
+  accessCode?: string;
+  createdAt: any;
+  approvedAt?: any;
+  approvedBy?: string;
+}

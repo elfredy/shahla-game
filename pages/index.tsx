@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Chapter, Word, Level } from '@/types';
+import { authService } from '@/lib/auth';
+import { useRouter } from 'next/router';
+import Link from 'next/link';
 
 const LEVELS: Level[] = [
   { id: 'A2', name: 'A2 Level' },
@@ -9,6 +12,9 @@ const LEVELS: Level[] = [
 ];
 
 export default function Home() {
+  const router = useRouter();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [selectedLevel, setSelectedLevel] = useState<string | null>(null);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
@@ -23,8 +29,43 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Load levels on mount - no need to load chapters until level is selected
-    setLoading(false);
+    // Check authentication
+    const checkAuth = async () => {
+      if (authService.isLoggedIn()) {
+        const session = authService.getSession();
+        if (session) {
+          // Verify session with Firebase
+          try {
+            const subscriptionsRef = collection(db, 'subscriptions');
+            const q = query(
+              subscriptionsRef,
+              where('email', '==', session.email),
+              where('status', '==', 'approved'),
+              where('accessCode', '==', session.accessCode)
+            );
+            const snapshot = await getDocs(q);
+            
+            if (!snapshot.empty) {
+              setIsAuthenticated(true);
+            } else {
+              authService.logout();
+              setIsAuthenticated(false);
+            }
+          } catch (error) {
+            console.error('Auth verification error:', error);
+            setIsAuthenticated(false);
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+      setCheckingAuth(false);
+      setLoading(false);
+    };
+
+    checkAuth();
   }, []);
 
   const loadChapters = async (level: string) => {
@@ -152,6 +193,46 @@ export default function Home() {
     resetGame();
   };
 
+  if (checkingAuth) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loading}>Yoxlanılır...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div style={styles.container}>
+        <header style={styles.header}>
+          <h1 className="modern-title" style={styles.title}>
+            Erstellt von <span className="shahla-name">Shahla</span>
+          </h1>
+        </header>
+        <main style={styles.main}>
+          <div style={styles.authContainer}>
+            <h2 style={styles.authTitle}>Oyunu Görmək Üçün Giriş Edin</h2>
+            <p style={styles.authText}>
+              Bu oyun yalnız təsdiqlənmiş istifadəçilər üçündür.
+              <br />
+              Əgər Access Code-unuz varsa, giriş edin.
+              <br />
+              Əgər yoxdursa, qeydiyyatdan keçin və admin təsdiqini gözləyin.
+            </p>
+            <div style={styles.authButtons}>
+              <Link href="/login" style={styles.authButton}>
+                Giriş Et
+              </Link>
+              <Link href="/register" style={styles.authButtonSecondary}>
+                Qeydiyyatdan Keç
+              </Link>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div style={styles.container}>
@@ -232,6 +313,18 @@ export default function Home() {
   return (
     <div style={styles.container}>
       <header style={styles.header}>
+        <div style={styles.headerTop}>
+          <button
+            onClick={() => {
+              authService.logout();
+              router.push('/login');
+            }}
+            style={styles.logoutButton}
+            title="Çıxış"
+          >
+            Çıxış
+          </button>
+        </div>
         <h1 className="modern-title" style={styles.title}>
         ⭐️  Erstellt von <span className="shahla-name">Şəhla </span> ⭐️
         </h1>
@@ -699,6 +792,86 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontFamily: 'monospace',
     fontSize: '16px',
     color: '#667eea',
+  },
+  headerTop: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    width: '100%',
+    marginBottom: '10px',
+  },
+  logoutButton: {
+    background: 'rgba(255, 255, 255, 0.2)',
+    border: '2px solid rgba(255, 255, 255, 0.4)',
+    borderRadius: '10px',
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#fff',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    backdropFilter: 'blur(10px)',
+  },
+  authContainer: {
+    background: 'rgba(255, 255, 255, 0.98)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    borderRadius: '24px',
+    padding: '50px 40px',
+    boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+    textAlign: 'center',
+    maxWidth: '600px',
+    margin: '0 auto',
+  },
+  authTitle: {
+    fontSize: 'clamp(24px, 5vw, 32px)',
+    marginBottom: '20px',
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 100%)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    fontWeight: '700',
+    letterSpacing: '0.5px',
+  },
+  authText: {
+    fontSize: '16px',
+    color: '#666',
+    lineHeight: '1.8',
+    marginBottom: '30px',
+  },
+  authButtons: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '15px',
+  },
+  authButton: {
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: '14px',
+    padding: '16px 30px',
+    fontSize: '18px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '0 8px 25px rgba(30, 60, 114, 0.4)',
+    textDecoration: 'none',
+    display: 'inline-block',
+    letterSpacing: '0.5px',
+  },
+  authButtonSecondary: {
+    background: 'transparent',
+    color: '#1e3c72',
+    border: '2px solid #1e3c72',
+    borderRadius: '14px',
+    padding: '16px 30px',
+    fontSize: '18px',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    textDecoration: 'none',
+    display: 'inline-block',
+    letterSpacing: '0.5px',
   },
 };
 

@@ -1,14 +1,29 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { collection, addDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { adminAuthService } from '@/lib/adminAuth';
+import { useRouter } from 'next/router';
 
 export default function Admin() {
+  const router = useRouter();
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [german, setGerman] = useState('');
   const [azerbaijani, setAzerbaijani] = useState('');
   const [chapter, setChapter] = useState('');
   const [level, setLevel] = useState('B1');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    // Check if admin is logged in
+    if (adminAuthService.isLoggedIn()) {
+      setIsAuthorized(true);
+    } else {
+      router.push('/admin/login');
+    }
+    setCheckingAuth(false);
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,11 +61,35 @@ export default function Admin() {
     }
   };
 
+  if (checkingAuth) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loading}>Yoxlanılır...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null; // Will redirect to login
+  }
+
   return (
     <div style={styles.container}>
       <header style={styles.header}>
         <h1 style={styles.title}>Admin Paneli</h1>
-        <a href="/" style={styles.backLink} className="back-link">← Ana Səhifə</a>
+        <div style={styles.navLinks}>
+          <a href="/admin/subscriptions" style={styles.backLink} className="back-link">Aboneliklər</a>
+          <button
+            onClick={() => {
+              adminAuthService.logout();
+              router.push('/admin/login');
+            }}
+            style={styles.logoutButton}
+          >
+            Çıxış
+          </button>
+          <a href="/" style={styles.backLink} className="back-link">← Ana Səhifə</a>
+        </div>
       </header>
 
       <main style={styles.main}>
@@ -146,16 +185,26 @@ const styles: { [key: string]: React.CSSProperties } = {
     marginBottom: '20px',
     padding: '0',
   },
+  navLinks: {
+    display: 'flex',
+    gap: '15px',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    marginTop: '10px',
+    alignItems: 'center',
+  },
   backLink: {
     color: '#fff',
-    fontSize: '18px',
+    fontSize: '16px',
     textDecoration: 'underline',
-    opacity: 0.95,
-    fontWeight: '600',
-    transition: 'opacity 0.2s',
+    opacity: 1,
+    fontWeight: '700',
+    transition: 'all 0.2s',
     display: 'inline-block',
-    marginTop: '10px',
-    textShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
+    textShadow: '0 2px 8px rgba(0, 0, 0, 0.5)',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
   },
   main: {
     maxWidth: '600px',
@@ -215,11 +264,12 @@ const styles: { [key: string]: React.CSSProperties } = {
   input: {
     padding: '16px 18px',
     borderRadius: '12px',
-    border: '2px solid rgba(30, 60, 114, 0.2)',
+    border: '2px solid rgba(30, 60, 114, 0.3)',
     fontSize: '16px',
     transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     fontFamily: 'inherit',
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: '#fff',
+    color: '#333',
   },
   submitButton: {
     background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)',
