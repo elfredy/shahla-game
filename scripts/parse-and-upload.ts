@@ -148,15 +148,15 @@ async function main() {
   // Get level from command line argument or default to B1
   const level = process.argv[2] || 'B1';
   
-  if (!['A2', 'B1'].includes(level)) {
-    console.error('Error: Level must be A2 or B1');
-    console.log('Usage: npm run parse [A2|B1]');
-    console.log('Example: npm run parse A2');
+  if (!['A1', 'A2', 'B1'].includes(level)) {
+    console.error('Error: Level must be A1, A2, or B1');
+    console.log('Usage: npm run parse [A1|A2|B1]');
+    console.log('Example: npm run parse A1');
     process.exit(1);
   }
   
   // Try to find the file based on level
-  const fileName = level === 'A2' ? 'A2 Level.docx' : 'kontext b1 word.docx';
+  const fileName = level === 'A1' ? 'A1.docx' : level === 'A2' ? 'A2 Level.docx' : 'kontext b1 word.docx';
   let docxPath = path.join(process.cwd(), fileName);
   if (!fs.existsSync(docxPath)) {
     docxPath = path.join(process.cwd(), '..', fileName);

@@ -8,6 +8,7 @@ import { useRouter } from 'next/router';
 import Link from 'next/link';
 
 const LEVELS: Level[] = [
+  { id: 'A1', name: 'A1 Level' },
   { id: 'A2', name: 'A2 Level' },
   { id: 'B1', name: 'B1 Level' },
 ];
