@@ -52,8 +52,14 @@ export default function Login() {
       const deviceInfo = deviceTracking.getDeviceInfo();
       const currentFingerprint = deviceInfo.deviceFingerprint;
 
+      if (!currentFingerprint) {
+        setMessage('✗ Cihaz bilgisi alınamadı. Lütfen tekrar deneyin.');
+        setLoading(false);
+        return;
+      }
+
       // Check device fingerprint from Firebase (not localStorage)
-      const storedFingerprint = subscription.deviceFingerprint;
+      const storedFingerprint = subscription.deviceFingerprint || undefined;
       
       // If there's a stored fingerprint and it doesn't match, block login
       if (storedFingerprint && storedFingerprint !== currentFingerprint) {
@@ -62,7 +68,7 @@ export default function Login() {
         return;
       }
 
-      // Update device fingerprint in Firebase
+      // Update device fingerprint in Firebase (always update to track current device)
       const subscriptionRef = doc(db, 'subscriptions', subscriptionDoc.id);
       await updateDoc(subscriptionRef, {
         deviceFingerprint: currentFingerprint
