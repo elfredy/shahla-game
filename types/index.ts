@@ -22,6 +22,7 @@ export interface Subscription {
   email: string;
   status: 'pending' | 'approved' | 'rejected';
   accessCode?: string;
+  deviceFingerprint?: string; // Last device fingerprint that logged in
   createdAt: any;
   approvedAt?: any;
   approvedBy?: string;

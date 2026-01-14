@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Chapter, Word, Level } from '@/types';
@@ -29,6 +29,47 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [gameStarted, setGameStarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<'AZ' | 'TR' | 'EN'>('AZ');
+  const [translating, setTranslating] = useState(false);
+  const [currentCorrectAnswer, setCurrentCorrectAnswer] = useState<string | null>(null);
+  
+  // Translation cache to avoid repeated API calls
+  const translationCacheRef = useRef<Map<string, string>>(new Map());
+
+  // Helper function to get translation
+  const getTranslation = async (germanText: string, targetLang: 'TR' | 'EN'): Promise<string> => {
+    const cacheKey = `${germanText}_${targetLang}`;
+    if (translationCacheRef.current.has(cacheKey)) {
+      return translationCacheRef.current.get(cacheKey)!;
+    }
+
+    try {
+      const response = await fetch('/api/translate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: germanText,
+          targetLang: targetLang,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Translation failed');
+      }
+
+      const data = await response.json();
+      if (data.translation) {
+        translationCacheRef.current.set(cacheKey, data.translation);
+        return data.translation;
+      }
+      throw new Error('No translation received');
+    } catch (error) {
+      console.error('Translation error:', error);
+      throw error;
+    }
+  };
 
   useEffect(() => {
     // Check authentication
@@ -36,20 +77,7 @@ export default function Home() {
       if (authService.isLoggedIn()) {
         const session = authService.getSession();
         if (session) {
-          // Verify device fingerprint
-          const deviceInfo = deviceTracking.getDeviceInfo();
-          const currentFingerprint = deviceInfo.deviceFingerprint;
-          
-          if (session.deviceFingerprint && session.deviceFingerprint !== currentFingerprint) {
-            // Device changed, logout
-            authService.logout();
-            setIsAuthenticated(false);
-            setCheckingAuth(false);
-            setLoading(false);
-            return;
-          }
-
-          // Verify session with Firebase
+          // Verify session with Firebase and device fingerprint
           try {
             const subscriptionsRef = collection(db, 'subscriptions');
             const q = query(
@@ -61,6 +89,22 @@ export default function Home() {
             const snapshot = await getDocs(q);
             
             if (!snapshot.empty) {
+              const subscription = snapshot.docs[0].data();
+              const deviceInfo = deviceTracking.getDeviceInfo();
+              const currentFingerprint = deviceInfo.deviceFingerprint;
+              
+              // Check device fingerprint from Firebase
+              const storedFingerprint = subscription.deviceFingerprint;
+              
+              // If there's a stored fingerprint and it doesn't match, logout
+              if (storedFingerprint && storedFingerprint !== currentFingerprint) {
+                authService.logout();
+                setIsAuthenticated(false);
+                setCheckingAuth(false);
+                setLoading(false);
+                return;
+              }
+              
               setIsAuthenticated(true);
             } else {
               authService.logout();
@@ -133,50 +177,90 @@ export default function Home() {
     loadChapters(levelId);
   };
 
-  const startGame = (chapterId: string) => {
+  const startGame = async (chapterId: string) => {
     setSelectedChapter(chapterId);
     setGameStarted(true);
     setScore(0);
     setTotalQuestions(0);
     setSelectedAnswer(null);
     setIsCorrect(null);
-    loadNextWord(chapterId);
+    await loadNextWord(chapterId);
   };
 
-  const loadNextWord = (chapterId: string) => {
+  const loadNextWord = async (chapterId: string) => {
     const chapter = chapters.find((ch) => ch.id === chapterId);
     if (!chapter || chapter.words.length === 0) return;
 
-    // Get random word from chapter
-    const randomWord = chapter.words[Math.floor(Math.random() * chapter.words.length)];
-    setCurrentWord(randomWord);
-
-    // Get 2 random wrong answers from other words in the same level
-    const allOtherWords = chapters.flatMap((ch) => 
-      ch.id !== chapterId ? ch.words : []
-    );
+    setTranslating(true);
     
-    const wrongAnswers: string[] = [];
-    while (wrongAnswers.length < 2 && allOtherWords.length > 0) {
-      const randomIndex = Math.floor(Math.random() * allOtherWords.length);
-      const wrongAnswer = allOtherWords[randomIndex].azerbaijani;
-      if (wrongAnswer !== randomWord.azerbaijani && !wrongAnswers.includes(wrongAnswer)) {
-        wrongAnswers.push(wrongAnswer);
-      }
-    }
+    try {
+      // Get random word from chapter
+      const randomWord = chapter.words[Math.floor(Math.random() * chapter.words.length)];
+      setCurrentWord(randomWord);
 
-    // Combine correct and wrong answers, then shuffle
-    const allOptions = [randomWord.azerbaijani, ...wrongAnswers].sort(() => Math.random() - 0.5);
-    setOptions(allOptions);
-    setSelectedAnswer(null);
-    setIsCorrect(null);
+      // Get translation based on selected language
+      let correctAnswer: string;
+      if (selectedLanguage === 'AZ') {
+        correctAnswer = randomWord.azerbaijani;
+      } else if (selectedLanguage === 'TR') {
+        correctAnswer = await getTranslation(randomWord.german, 'TR');
+      } else {
+        correctAnswer = await getTranslation(randomWord.german, 'EN');
+      }
+      
+      setCurrentCorrectAnswer(correctAnswer);
+
+      // Get 2 random wrong answers from other words in the same level
+      const allOtherWords = chapters.flatMap((ch) => 
+        ch.id !== chapterId ? ch.words : []
+      );
+      
+      const wrongAnswers: string[] = [];
+      const usedIndices = new Set<number>();
+      
+      // Get wrong answers based on selected language
+      while (wrongAnswers.length < 2 && allOtherWords.length > 0) {
+        const randomIndex = Math.floor(Math.random() * allOtherWords.length);
+        if (usedIndices.has(randomIndex)) continue;
+        usedIndices.add(randomIndex);
+        
+        const wrongWord = allOtherWords[randomIndex];
+        
+        let wrongAnswer: string;
+        if (selectedLanguage === 'AZ') {
+          wrongAnswer = wrongWord.azerbaijani;
+        } else if (selectedLanguage === 'TR') {
+          wrongAnswer = await getTranslation(wrongWord.german, 'TR');
+        } else {
+          wrongAnswer = await getTranslation(wrongWord.german, 'EN');
+        }
+        
+        if (wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
+          wrongAnswers.push(wrongAnswer);
+        }
+        
+        // Prevent infinite loop
+        if (usedIndices.size >= allOtherWords.length) break;
+      }
+
+      // Combine correct and wrong answers, then shuffle
+      const allOptions = [correctAnswer, ...wrongAnswers].sort(() => Math.random() - 0.5);
+      setOptions(allOptions);
+      setSelectedAnswer(null);
+      setIsCorrect(null);
+    } catch (error) {
+      console.error('Error loading word:', error);
+      setError('Çeviri yüklenirken hata oluştu');
+    } finally {
+      setTranslating(false);
+    }
   };
 
   const handleAnswerSelect = (answer: string) => {
     if (selectedAnswer) return; // Prevent multiple selections
     
     setSelectedAnswer(answer);
-    const correct = answer === currentWord?.azerbaijani;
+    const correct = answer === currentCorrectAnswer;
     setIsCorrect(correct);
     
     if (correct) {
@@ -185,9 +269,9 @@ export default function Home() {
     setTotalQuestions(totalQuestions + 1);
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (selectedChapter) {
-      loadNextWord(selectedChapter);
+      await loadNextWord(selectedChapter);
     }
   };
 
@@ -200,6 +284,7 @@ export default function Home() {
     setIsCorrect(null);
     setScore(0);
     setTotalQuestions(0);
+    setCurrentCorrectAnswer(null);
   };
 
   const resetToLevelSelection = () => {
@@ -348,7 +433,37 @@ export default function Home() {
       <main style={styles.main}>
         {!selectedLevel ? (
           <div style={styles.levelSelection}>
-            <h2 style={styles.sectionTitle}>Level Seçin</h2>
+            <h2 style={styles.sectionTitle}>Dil Seçin</h2>
+            <div style={styles.languageGrid}>
+              <button
+                onClick={() => setSelectedLanguage('AZ')}
+                style={{
+                  ...styles.languageButton,
+                  ...(selectedLanguage === 'AZ' ? styles.languageButtonActive : {})
+                }}
+              >
+                Azərbaycan
+              </button>
+              <button
+                onClick={() => setSelectedLanguage('TR')}
+                style={{
+                  ...styles.languageButton,
+                  ...(selectedLanguage === 'TR' ? styles.languageButtonActive : {})
+                }}
+              >
+                Türkçe
+              </button>
+              <button
+                onClick={() => setSelectedLanguage('EN')}
+                style={{
+                  ...styles.languageButton,
+                  ...(selectedLanguage === 'EN' ? styles.languageButtonActive : {})
+                }}
+              >
+                English
+              </button>
+            </div>
+            <h2 style={{...styles.sectionTitle, marginTop: '40px'}}>Level Seçin</h2>
             <div style={styles.levelGrid}>
               {LEVELS.map((level) => (
                 <button
@@ -507,6 +622,31 @@ const styles: { [key: string]: React.CSSProperties } = {
     padding: '40px',
     boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2) inset',
     border: '1px solid rgba(255, 255, 255, 0.3)',
+  },
+  languageGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, 1fr)',
+    gap: '15px',
+    marginBottom: '40px',
+  },
+  languageButton: {
+    background: 'rgba(255, 255, 255, 0.95)',
+    border: '2px solid rgba(30, 60, 114, 0.3)',
+    borderRadius: '16px',
+    padding: '20px 15px',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    color: '#1e3c72',
+    fontSize: 'clamp(16px, 3vw, 20px)',
+    fontWeight: '600',
+    textAlign: 'center',
+    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.1)',
+  },
+  languageButtonActive: {
+    background: 'linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #667eea 100%)',
+    borderColor: '#1e3c72',
+    color: '#fff',
+    boxShadow: '0 6px 20px rgba(30, 60, 114, 0.4)',
   },
   levelGrid: {
     display: 'grid',

@@ -5,20 +5,25 @@ export interface UserSession {
   accessCode: string;
   loggedIn: boolean;
   deviceFingerprint?: string;
+  expiresAt: number; // Timestamp when session expires
 }
 
 const STORAGE_KEY = 'words_game_session';
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes in milliseconds
 
 export const authService = {
   // Save session to localStorage
   saveSession(email: string, accessCode: string, deviceFingerprint?: string): void {
     if (typeof window === 'undefined') return;
     
+    const expiresAt = Date.now() + SESSION_TIMEOUT;
+    
     const session: UserSession = {
       email,
       accessCode,
       loggedIn: true,
-      deviceFingerprint
+      deviceFingerprint,
+      expiresAt
     };
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -33,6 +38,14 @@ export const authService = {
       if (!stored) return null;
       
       const session: UserSession = JSON.parse(stored);
+      
+      // Check if session is expired
+      if (session.expiresAt && Date.now() > session.expiresAt) {
+        // Session expired, remove it
+        localStorage.removeItem(STORAGE_KEY);
+        return null;
+      }
+      
       return session.loggedIn ? session : null;
     } catch (error) {
       return null;

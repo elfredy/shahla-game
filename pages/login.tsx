@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { authService } from '@/lib/auth';
 import { deviceTracking } from '@/lib/deviceTracking';
@@ -39,7 +39,8 @@ export default function Login() {
         return;
       }
 
-      const subscription = snapshot.docs[0].data();
+      const subscriptionDoc = snapshot.docs[0];
+      const subscription = subscriptionDoc.data();
       
       if (subscription.accessCode !== accessCode.trim()) {
         setMessage('✗ Access Code səhvdir! Zəhmət olmasa düzgün kodu daxil edin.');
@@ -51,15 +52,21 @@ export default function Login() {
       const deviceInfo = deviceTracking.getDeviceInfo();
       const currentFingerprint = deviceInfo.deviceFingerprint;
 
-      // Check if device is allowed (first time login or same device)
-      if (!deviceTracking.isDeviceAllowed(email.toLowerCase().trim(), currentFingerprint)) {
+      // Check device fingerprint from Firebase (not localStorage)
+      const storedFingerprint = subscription.deviceFingerprint;
+      
+      // If there's a stored fingerprint and it doesn't match, block login
+      if (storedFingerprint && storedFingerprint !== currentFingerprint) {
         setMessage('✗ Bu email ünvanı başqa bir cihazda aktivdir. Yalnız bir cihazdan giriş edə bilərsiniz.');
         setLoading(false);
         return;
       }
 
-      // Store device fingerprint
-      deviceTracking.storeFingerprint(email.toLowerCase().trim(), currentFingerprint);
+      // Update device fingerprint in Firebase
+      const subscriptionRef = doc(db, 'subscriptions', subscriptionDoc.id);
+      await updateDoc(subscriptionRef, {
+        deviceFingerprint: currentFingerprint
+      });
 
       // Save session
       authService.saveSession(email.toLowerCase().trim(), accessCode.trim(), currentFingerprint);
