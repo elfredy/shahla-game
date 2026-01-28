@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { Chapter, Word, Level } from '@/types';
+import { collection, getDocs, query, where, doc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '@/lib/firebase';
+import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
+import { Chapter, Word, Level, Subscription } from '@/types';
 import { authService } from '@/lib/auth';
 import { deviceTracking } from '@/lib/deviceTracking';
 import { useRouter } from 'next/router';
@@ -32,6 +33,7 @@ export default function Home() {
   const [selectedLanguage, setSelectedLanguage] = useState<'AZ' | 'TR' | 'EN'>('AZ');
   const [translating, setTranslating] = useState(false);
   const [currentCorrectAnswer, setCurrentCorrectAnswer] = useState<string | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
   
   // Translation cache to avoid repeated API calls
   const translationCacheRef = useRef<Map<string, string>>(new Map());
@@ -72,59 +74,62 @@ export default function Home() {
   };
 
   useEffect(() => {
-    // Check authentication
-    const checkAuth = async () => {
-      if (authService.isLoggedIn()) {
-        const session = authService.getSession();
-        if (session) {
-          // Verify session with Firebase and device fingerprint
-          try {
-            const subscriptionsRef = collection(db, 'subscriptions');
-            const q = query(
-              subscriptionsRef,
-              where('email', '==', session.email),
-              where('status', '==', 'approved'),
-              where('accessCode', '==', session.accessCode)
-            );
-            const snapshot = await getDocs(q);
+    // Demo mode: Allow everyone to play, optional authentication for premium
+    // Check authentication with Firebase Auth (optional - for premium users)
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user && user.email) {
+        // User is authenticated with email (premium user)
+        try {
+          const subscriptionsRef = collection(db, 'subscriptions');
+          const q = query(subscriptionsRef, where('email', '==', user.email?.toLowerCase().trim()));
+          const snapshot = await getDocs(q);
+          
+          if (!snapshot.empty) {
+            const subscriptionData = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() } as Subscription;
+            setSubscription(subscriptionData);
             
-            if (!snapshot.empty) {
-              const subscription = snapshot.docs[0].data();
-              const deviceInfo = deviceTracking.getDeviceInfo();
-              const currentFingerprint = deviceInfo.deviceFingerprint;
-              
-              // Check device fingerprint from Firebase
-              const storedFingerprint = subscription.deviceFingerprint;
-              
-              // If there's a stored fingerprint and it doesn't match, logout
-              if (storedFingerprint && storedFingerprint !== currentFingerprint) {
-                authService.logout();
-                setIsAuthenticated(false);
-                setCheckingAuth(false);
-                setLoading(false);
-                return;
-              }
-              
-              setIsAuthenticated(true);
-            } else {
+            const deviceInfo = deviceTracking.getDeviceInfo();
+            const currentFingerprint = deviceInfo.deviceFingerprint;
+            
+            // Check device fingerprint from Firebase
+            const storedFingerprint = subscriptionData.deviceFingerprint;
+            
+            // If there's a stored fingerprint and it doesn't match, logout
+            if (storedFingerprint && storedFingerprint !== currentFingerprint) {
+              await firebaseSignOut(auth);
               authService.logout();
               setIsAuthenticated(false);
+              setSubscription(null); // Reset to demo mode
+              setCheckingAuth(false);
+              setLoading(false);
+              return;
             }
-          } catch (error) {
-            console.error('Auth verification error:', error);
+            
+            // Save session
+            authService.saveSession(user.email || '', '', currentFingerprint);
+            setIsAuthenticated(true);
+          } else {
+            // Subscription not found, logout but allow demo mode
+            await firebaseSignOut(auth);
+            authService.logout();
             setIsAuthenticated(false);
+            setSubscription(null); // Demo mode
           }
-        } else {
+        } catch (error) {
+          console.error('Auth verification error:', error);
           setIsAuthenticated(false);
+          setSubscription(null); // Demo mode on error
         }
       } else {
+        // No user authenticated - Demo mode (free tier)
         setIsAuthenticated(false);
+        setSubscription(null); // Demo mode
       }
       setCheckingAuth(false);
       setLoading(false);
-    };
+    });
 
-    checkAuth();
+    return () => unsubscribe();
   }, []);
 
   const loadChapters = async (level: string) => {
@@ -152,7 +157,22 @@ export default function Home() {
         chaptersMap.get(word.chapter)!.words.push(word);
       });
 
-      setChapters(Array.from(chaptersMap.values()));
+      let filteredChapters = Array.from(chaptersMap.values());
+      
+      // Apply access control based on subscription
+      // Demo mode (no subscription) or free tier: Only show chapter 1
+      if (!subscription || (subscription.accessLevel === 'free' && subscription.chaptersAllowed !== 'all')) {
+        // Demo/Free tier: Only show chapter 1
+        filteredChapters = filteredChapters.filter((chapter, index) => {
+          // Extract chapter number from chapter name (e.g., "Kapitel 1" -> 1)
+          const chapterMatch = chapter.name.match(/\d+/);
+          const chapterNum = chapterMatch ? parseInt(chapterMatch[0]) : index + 1;
+          return chapterNum === 1; // Only first chapter
+        });
+      }
+      // Premium tier (chaptersAllowed === 'all'): Show all chapters
+
+      setChapters(filteredChapters);
       setLoading(false);
       setError(null);
     } catch (error: any) {
@@ -210,10 +230,16 @@ export default function Home() {
       
       setCurrentCorrectAnswer(correctAnswer);
 
-      // Get 2 random wrong answers from other words in the same level
-      const allOtherWords = chapters.flatMap((ch) => 
+      // Get 2 random wrong answers.
+      // If only one chapter is available (demo/free), fall back to other words in the same chapter.
+      const sameChapterOtherWords = chapter.words.filter(
+        (w) => w.german !== randomWord.german
+      );
+      const otherChaptersWords = chapters.flatMap((ch) =>
         ch.id !== chapterId ? ch.words : []
       );
+      const allOtherWords =
+        otherChaptersWords.length > 0 ? otherChaptersWords : sameChapterOtherWords;
       
       const wrongAnswers: string[] = [];
       const usedIndices = new Set<number>();
@@ -241,6 +267,24 @@ export default function Home() {
         
         // Prevent infinite loop
         if (usedIndices.size >= allOtherWords.length) break;
+      }
+
+      // If still not enough (very small datasets), reuse same-chapter pool as a last resort.
+      if (wrongAnswers.length < 2 && sameChapterOtherWords.length > 0) {
+        for (const wrongWord of sameChapterOtherWords) {
+          if (wrongAnswers.length >= 2) break;
+          let wrongAnswer: string;
+          if (selectedLanguage === 'AZ') {
+            wrongAnswer = wrongWord.azerbaijani;
+          } else if (selectedLanguage === 'TR') {
+            wrongAnswer = await getTranslation(wrongWord.german, 'TR');
+          } else {
+            wrongAnswer = await getTranslation(wrongWord.german, 'EN');
+          }
+          if (wrongAnswer !== correctAnswer && !wrongAnswers.includes(wrongAnswer)) {
+            wrongAnswers.push(wrongAnswer);
+          }
+        }
       }
 
       // Combine correct and wrong answers, then shuffle
@@ -275,7 +319,25 @@ export default function Home() {
     }
   };
 
-  const resetGame = () => {
+  const resetGame = async () => {
+    // Save points to Firebase if user earned points
+    if (subscription && score > 0) {
+      try {
+        const subscriptionRef = doc(db, 'subscriptions', subscription.id);
+        const currentTotalPoints = subscription.totalPoints || 0;
+        await updateDoc(subscriptionRef, {
+          totalPoints: currentTotalPoints + score
+        });
+        // Update local subscription state
+        setSubscription({
+          ...subscription,
+          totalPoints: currentTotalPoints + score
+        });
+      } catch (error) {
+        console.error('Error saving points:', error);
+      }
+    }
+    
     setGameStarted(false);
     setSelectedChapter(null);
     setCurrentWord(null);
@@ -287,10 +349,10 @@ export default function Home() {
     setCurrentCorrectAnswer(null);
   };
 
-  const resetToLevelSelection = () => {
+  const resetToLevelSelection = async () => {
     setSelectedLevel(null);
     setChapters([]);
-    resetGame();
+    await resetGame();
   };
 
   if (checkingAuth) {
@@ -301,37 +363,8 @@ export default function Home() {
     );
   }
 
-  if (!isAuthenticated) {
-    return (
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <h1 className="modern-title" style={styles.title}>
-            Erstellt von <span className="shahla-name">Shahla</span>
-          </h1>
-        </header>
-        <main style={styles.main}>
-          <div style={styles.authContainer}>
-            <h2 style={styles.authTitle}>Oyunu Görmək Üçün Giriş Edin</h2>
-            <p style={styles.authText}>
-              Bu oyun yalnız təsdiqlənmiş istifadəçilər üçündür.
-              <br />
-              Əgər Access Code-unuz varsa, giriş edin.
-              <br />
-              Əgər yoxdursa, qeydiyyatdan keçin və admin təsdiqini gözləyin.
-            </p>
-            <div style={styles.authButtons}>
-              <Link href="/login" style={styles.authButton}>
-                Giriş Et
-              </Link>
-              <Link href="/register" style={styles.authButtonSecondary}>
-                Qeydiyyatdan Keç
-              </Link>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  // Demo mode: Everyone can play, no authentication required
+  // Premium users can login for full access
 
   if (loading) {
     return (
@@ -414,16 +447,25 @@ export default function Home() {
     <div style={styles.container}>
       <header style={styles.header}>
         <div style={styles.headerTop}>
-          <button
-            onClick={() => {
-              authService.logout();
-              router.push('/login');
-            }}
-            style={styles.logoutButton}
-            title="Çıxış"
-          >
-            Çıxış
-          </button>
+          {isAuthenticated ? (
+            <button
+              onClick={async () => {
+                await firebaseSignOut(auth);
+                authService.logout();
+                setSubscription(null);
+                setIsAuthenticated(false);
+                router.reload();
+              }}
+              style={styles.logoutButton}
+              title="Çıxış"
+            >
+              Çıxış
+            </button>
+          ) : (
+            <Link href="/login" style={styles.premiumButton}>
+              💎 Premium'a Geç
+            </Link>
+          )}
         </div>
         <h1 className="modern-title" style={styles.title}>
         ⭐️  Erstellt von <span className="shahla-name">Şəhla </span> ⭐️
@@ -496,19 +538,47 @@ export default function Home() {
                 </p>
               </div>
             ) : (
-              <div style={styles.chapterGrid} className="chapter-grid">
-                {chapters.map((chapter) => (
-                  <button
-                    key={chapter.id}
-                    onClick={() => startGame(chapter.id)}
-                    style={styles.chapterButton}
-                    className="chapter-button"
-                  >
-                    <div style={styles.chapterName}>{chapter.name}</div>
-                    <div style={styles.wordCount}>{chapter.words.length} söz</div>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div style={styles.chapterGrid} className="chapter-grid">
+                  {chapters.map((chapter) => {
+                    const chapterPoints = chapter.words.length; // Each word = 1 point
+                    return (
+                      <button
+                        key={chapter.id}
+                        onClick={() => startGame(chapter.id)}
+                        style={styles.chapterButton}
+                        className="chapter-button"
+                      >
+                        <div style={styles.chapterName}>{chapter.name}</div>
+                        <div style={styles.wordCount}>{chapter.words.length} söz</div>
+                        <div style={styles.pointsBadge}>⭐ {chapterPoints} puan</div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {(!subscription || (subscription.accessLevel === 'free' && subscription.chaptersAllowed !== 'all')) && (
+                  <div style={styles.premiumBanner}>
+                    <div style={styles.premiumBannerContent}>
+                      <div style={styles.premiumBannerText}>
+                        <strong>💎 Premium'a keçin!</strong>
+                        <br />
+                        Bütün kapitellərə çıxış əldə edin
+                      </div>
+                      <Link href="/login" style={styles.premiumLinkButton}>
+                        🔐 Premium'a Giriş Et
+                      </Link>
+                      <a
+                        href={`https://wa.me/994507772885?text=Merhaba, premium üyelik hakkında bilgi almak istiyorum.`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={styles.whatsappButton}
+                      >
+                        📱 WhatsApp ilə Əlaqə
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -727,6 +797,63 @@ const styles: { [key: string]: React.CSSProperties } = {
   wordCount: {
     fontSize: 'clamp(12px, 2.5vw, 14px)',
     opacity: 0.9,
+    marginBottom: '4px',
+  },
+  pointsBadge: {
+    fontSize: 'clamp(11px, 2vw, 13px)',
+    fontWeight: '600',
+    marginTop: '6px',
+    padding: '4px 8px',
+    background: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: '8px',
+    border: '1px solid rgba(255, 255, 255, 0.3)',
+  },
+  premiumBanner: {
+    marginTop: '30px',
+    padding: '20px',
+    background: 'linear-gradient(135deg, #25D366 0%, #128C7E 100%)',
+    borderRadius: '16px',
+    boxShadow: '0 8px 20px rgba(37, 211, 102, 0.3)',
+  },
+  premiumBannerContent: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '15px',
+    alignItems: 'center',
+  },
+  premiumLinkButton: {
+    background: '#fff',
+    color: '#667eea',
+    border: '2px solid #fff',
+    borderRadius: '12px',
+    padding: '12px 24px',
+    fontSize: 'clamp(14px, 2.5vw, 16px)',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
+    textDecoration: 'none',
+    display: 'inline-block',
+  },
+  premiumBannerText: {
+    color: '#fff',
+    fontSize: 'clamp(16px, 3vw, 18px)',
+    textAlign: 'center',
+    lineHeight: '1.6',
+  },
+  whatsappButton: {
+    background: '#fff',
+    color: '#25D366',
+    border: 'none',
+    borderRadius: '12px',
+    padding: '12px 24px',
+    fontSize: 'clamp(14px, 2.5vw, 16px)',
+    fontWeight: '700',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    boxShadow: '0 4px 15px rgba(0, 0, 0, 0.2)',
+    textDecoration: 'none',
+    display: 'inline-block',
   },
   gameContainer: {
     background: 'rgba(255, 255, 255, 0.98)',
@@ -965,6 +1092,20 @@ const styles: { [key: string]: React.CSSProperties } = {
     cursor: 'pointer',
     transition: 'all 0.2s',
     backdropFilter: 'blur(10px)',
+  },
+  premiumButton: {
+    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    border: 'none',
+    borderRadius: '10px',
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#fff',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+    textDecoration: 'none',
+    display: 'inline-block',
+    boxShadow: '0 4px 15px rgba(102, 126, 234, 0.3)',
   },
   authContainer: {
     background: 'rgba(255, 255, 255, 0.98)',

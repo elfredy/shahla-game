@@ -1,8 +1,9 @@
 // Authentication utilities
 
 export interface UserSession {
-  email: string;
-  accessCode: string;
+  email: string; // Email for login
+  phoneNumber?: string; // Optional: Keep for backward compatibility
+  accessCode?: string; // Optional: Keep for backward compatibility
   loggedIn: boolean;
   deviceFingerprint?: string;
   expiresAt: number; // Timestamp when session expires
@@ -61,7 +62,7 @@ export const authService = {
   // Get current user email
   getCurrentUser(): string | null {
     const session = this.getSession();
-    return session?.email || null;
+    return session?.email || session?.phoneNumber || null;
   },
 
   // Logout

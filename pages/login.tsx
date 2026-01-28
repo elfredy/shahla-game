@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, updateDoc, setDoc } from 'firebase/firestore';
+import { signInWithEmailAndPassword, signOut as firebaseSignOut } from 'firebase/auth';
+import { db, auth } from '@/lib/firebase';
 import { authService } from '@/lib/auth';
 import { deviceTracking } from '@/lib/deviceTracking';
 import { useRouter } from 'next/router';
@@ -8,16 +9,21 @@ import Link from 'next/link';
 
 export default function Login() {
   const [email, setEmail] = useState('');
-  const [accessCode, setAccessCode] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const router = useRouter();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!email || !accessCode) {
-      setMessage('Zəhmət olmasa email və Access Code daxil edin!');
+    if (!email || !email.includes('@')) {
+      setMessage('Zəhmət olmasa düzgün bir email ünvanı daxil edin!');
+      return;
+    }
+
+    if (!password) {
+      setMessage('Zəhmət olmasa şifrə daxil edin!');
       return;
     }
 
@@ -25,57 +31,72 @@ export default function Login() {
     setMessage('');
 
     try {
-      const subscriptionsRef = collection(db, 'subscriptions');
-      const q = query(
-        subscriptionsRef,
-        where('email', '==', email.toLowerCase().trim()),
-        where('status', '==', 'approved')
+      // Sign in with Firebase Auth
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email.toLowerCase().trim(),
+        password
       );
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        setMessage('✗ Bu email ünvanı təsdiqlənməyib və ya mövcud deyil. Zəhmət olmasa qeydiyyatdan keçin.');
-        setLoading(false);
-        return;
-      }
-
-      const subscriptionDoc = snapshot.docs[0];
-      const subscription = subscriptionDoc.data();
-      
-      if (subscription.accessCode !== accessCode.trim()) {
-        setMessage('✗ Access Code səhvdir! Zəhmət olmasa düzgün kodu daxil edin.');
-        setLoading(false);
-        return;
-      }
+      const user = userCredential.user;
 
       // Get device info
       const deviceInfo = deviceTracking.getDeviceInfo();
       const currentFingerprint = deviceInfo.deviceFingerprint;
 
       if (!currentFingerprint) {
+        await firebaseSignOut(auth);
         setMessage('✗ Cihaz bilgisi alınamadı. Lütfen tekrar deneyin.');
         setLoading(false);
         return;
       }
 
-      // Check device fingerprint from Firebase (not localStorage)
-      const storedFingerprint = subscription.deviceFingerprint || undefined;
-      
-      // If there's a stored fingerprint and it doesn't match, block login
-      if (storedFingerprint && storedFingerprint !== currentFingerprint) {
-        setMessage('✗ Bu email ünvanı başqa bir cihazda aktivdir. Yalnız bir cihazdan giriş edə bilərsiniz.');
-        setLoading(false);
-        return;
+      // Check subscription in Firestore
+      const subscriptionsRef = collection(db, 'subscriptions');
+      const q = query(subscriptionsRef, where('email', '==', user.email?.toLowerCase().trim()));
+      const snapshot = await getDocs(q);
+
+      let subscription: any;
+
+      if (snapshot.empty) {
+        // Create new subscription with free tier
+        const newSubscription = {
+          email: user.email?.toLowerCase().trim(),
+          status: 'free',
+          accessLevel: 'free',
+          chaptersAllowed: [1], // Only first chapter for free tier
+          deviceFingerprint: currentFingerprint,
+          totalPoints: 0,
+          createdAt: new Date(),
+          whatsappContacted: false
+        };
+        
+        // Create a new document for this user in subscriptions collection
+        await setDoc(doc(db, 'subscriptions', user.uid), newSubscription);
+        subscription = newSubscription;
+      } else {
+        // Update existing subscription
+        const subscriptionDoc = snapshot.docs[0];
+        subscription = subscriptionDoc.data();
+
+        // Check device fingerprint
+        const storedFingerprint = subscription.deviceFingerprint;
+        
+        if (storedFingerprint && storedFingerprint !== currentFingerprint) {
+          await firebaseSignOut(auth);
+          setMessage('✗ Bu email başqa bir cihazda aktivdir. Yalnız bir cihazdan giriş edə bilərsiniz.');
+          setLoading(false);
+          return;
+        }
+
+        // Update device fingerprint
+        const subscriptionRef = doc(db, 'subscriptions', subscriptionDoc.id);
+        await updateDoc(subscriptionRef, {
+          deviceFingerprint: currentFingerprint
+        });
       }
 
-      // Update device fingerprint in Firebase (always update to track current device)
-      const subscriptionRef = doc(db, 'subscriptions', subscriptionDoc.id);
-      await updateDoc(subscriptionRef, {
-        deviceFingerprint: currentFingerprint
-      });
-
       // Save session
-      authService.saveSession(email.toLowerCase().trim(), accessCode.trim(), currentFingerprint);
+      authService.saveSession(user.email || '', '', currentFingerprint);
       
       setMessage('✓ Giriş uğurlu! Yönləndirilirsiniz...');
       
@@ -86,7 +107,18 @@ export default function Login() {
       
     } catch (error: any) {
       console.error('Error logging in:', error);
-      setMessage('✗ Xəta baş verdi! ' + (error?.message || ''));
+      
+      if (error.code === 'auth/user-not-found') {
+        setMessage('✗ Bu email ilə qeydiyyat tapılmadı. Zəhmət olmasa qeydiyyatdan keçin.');
+      } else if (error.code === 'auth/wrong-password') {
+        setMessage('✗ Şifrə səhvdir! Zəhmət olmasa düzgün şifrəni daxil edin.');
+      } else if (error.code === 'auth/invalid-email') {
+        setMessage('✗ Email ünvanı düzgün deyil. Zəhmət olmasa düzgün email daxil edin.');
+      } else if (error.code === 'auth/too-many-requests') {
+        setMessage('✗ Çox sayda uğursuz cəhd. Zəhmət olmasa bir az gözləyin və yenidən cəhd edin.');
+      } else {
+        setMessage('✗ Xəta baş verdi! ' + (error?.message || ''));
+      }
       setLoading(false);
     }
   };
@@ -121,14 +153,14 @@ export default function Login() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={styles.form}>
+          <form onSubmit={handleLogin} style={styles.form}>
             <div style={styles.inputGroup}>
               <label style={styles.label}>Email Ünvanı:</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="məsələn: example@email.com"
+                placeholder="example@email.com"
                 style={styles.input}
                 required
                 disabled={loading}
@@ -136,19 +168,16 @@ export default function Login() {
             </div>
 
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Access Code:</label>
+              <label style={styles.label}>Şifrə:</label>
               <input
-                type="text"
-                value={accessCode}
-                onChange={(e) => setAccessCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                placeholder="6 rəqəmli kod"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Şifrənizi daxil edin"
                 style={styles.input}
                 required
                 disabled={loading}
-                maxLength={6}
-                pattern="[0-9]{6}"
               />
-              <small style={styles.hint}>Admin tərəfindən verilən 6 rəqəmli kod</small>
             </div>
 
             <button
@@ -163,7 +192,7 @@ export default function Login() {
 
           <div style={styles.linkContainer}>
             <p style={styles.linkText}>
-              Access Code-unuz yoxdur?{' '}
+              Hesabınız yoxdur?{' '}
               <Link href="/register" style={styles.link}>Qeydiyyatdan keçin</Link>
             </p>
           </div>
@@ -271,6 +300,18 @@ const styles: { [key: string]: React.CSSProperties } = {
     boxShadow: '0 8px 25px rgba(30, 60, 114, 0.4)',
     marginTop: '15px',
     letterSpacing: '0.5px',
+  },
+  backButton: {
+    background: 'transparent',
+    color: '#1e3c72',
+    border: '2px solid rgba(30, 60, 114, 0.3)',
+    borderRadius: '14px',
+    padding: '12px',
+    fontSize: '16px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+    marginTop: '10px',
   },
   linkContainer: {
     marginTop: '25px',

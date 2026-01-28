@@ -13,7 +13,7 @@ export default function Subscriptions() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'pending_payment' | 'paid' | 'free' | 'rejected'>('all');
 
   useEffect(() => {
     // Check if admin is logged in
@@ -46,22 +46,22 @@ export default function Subscriptions() {
   };
 
   const handleApprove = async (subscription: Subscription) => {
-    if (!confirm(`"${subscription.email}" email ünvanını təsdiqləmək istəyirsiniz?`)) {
+    if (!confirm(`"${subscription.email}" email ünvanını Premium olaraq təsdiqləmək istəyirsiniz?`)) {
       return;
     }
 
     try {
-      const accessCode = authService.generateAccessCode();
       const subscriptionRef = doc(db, 'subscriptions', subscription.id);
       
       await updateDoc(subscriptionRef, {
-        status: 'approved',
-        accessCode: accessCode,
-        approvedAt: new Date(),
+        status: 'paid',
+        accessLevel: 'premium',
+        chaptersAllowed: 'all',
+        paidAt: new Date(),
         approvedBy: 'admin'
       });
 
-      alert(`Email təsdiqləndi!\n\nAccess Code: ${accessCode}\n\nBu kodu kopyalayın və istifadəçiyə verin.`);
+      alert(`✓ Premium aktivləşdirildi!\n\n"${subscription.email}" artıq bütün kapitellərə çıxış əldə edib.`);
       
       loadSubscriptions();
     } catch (error) {
@@ -142,13 +142,13 @@ export default function Subscriptions() {
             onClick={() => setFilter('pending')}
             style={{ ...styles.filterButton, ...(filter === 'pending' ? styles.filterButtonActive : {}) }}
           >
-            Gözləmədə ({subscriptions.filter(s => s.status === 'pending').length})
+            Gözləmədə ({subscriptions.filter(s => s.status === 'pending' || s.status === 'pending_payment').length})
           </button>
           <button
-            onClick={() => setFilter('approved')}
-            style={{ ...styles.filterButton, ...(filter === 'approved' ? styles.filterButtonActive : {}) }}
+            onClick={() => setFilter('paid')}
+            style={{ ...styles.filterButton, ...(filter === 'paid' ? styles.filterButtonActive : {}) }}
           >
-            Təsdiqlənmiş ({subscriptions.filter(s => s.status === 'approved').length})
+            Premium ({subscriptions.filter(s => s.status === 'paid').length})
           </button>
           <button
             onClick={() => setFilter('rejected')}
@@ -183,12 +183,14 @@ export default function Subscriptions() {
                     <td style={styles.td}>
                       <span style={{
                         ...styles.statusBadge,
-                        ...(sub.status === 'approved' ? styles.statusApproved : {}),
-                        ...(sub.status === 'pending' ? styles.statusPending : {}),
+                        ...(sub.status === 'paid' ? styles.statusApproved : {}),
+                        ...(sub.status === 'free' ? { background: '#e3f2fd', color: '#1976d2' } : {}),
+                        ...(sub.status === 'pending' || sub.status === 'pending_payment' ? styles.statusPending : {}),
                         ...(sub.status === 'rejected' ? styles.statusRejected : {})
                       }}>
-                        {sub.status === 'approved' ? '✓ Təsdiqlənmiş' : 
-                         sub.status === 'pending' ? '⏳ Gözləmədə' : 
+                        {sub.status === 'paid' ? '💎 Premium' : 
+                         sub.status === 'free' ? '🆓 Free' :
+                         sub.status === 'pending' || sub.status === 'pending_payment' ? '⏳ Gözləmədə' : 
                          '✗ Rədd Edilmiş'}
                       </span>
                     </td>
@@ -212,13 +214,13 @@ export default function Subscriptions() {
                       {sub.createdAt?.toDate ? sub.createdAt.toDate().toLocaleDateString('az-AZ') : '-'}
                     </td>
                     <td style={styles.td}>
-                      {sub.status === 'pending' && (
+                      {(sub.status === 'pending' || sub.status === 'pending_payment') && (
                         <div style={styles.actionButtons}>
                           <button
                             onClick={() => handleApprove(sub)}
                             style={styles.approveButton}
                           >
-                            Təsdiqlə
+                            💎 Premium Yap
                           </button>
                           <button
                             onClick={() => handleReject(sub)}
@@ -228,13 +230,8 @@ export default function Subscriptions() {
                           </button>
                         </div>
                       )}
-                      {sub.status === 'approved' && sub.accessCode && (
-                        <button
-                          onClick={() => copyToClipboard(sub.accessCode!)}
-                          style={styles.copyCodeButton}
-                        >
-                          Code-u Kopyala
-                        </button>
+                      {sub.status === 'paid' && (
+                        <span style={{ color: '#4caf50', fontWeight: '600' }}>✓ Premium Aktif</span>
                       )}
                     </td>
                   </tr>

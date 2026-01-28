@@ -19,11 +19,26 @@ export interface Level {
 
 export interface Subscription {
   id: string;
-  email: string;
-  status: 'pending' | 'approved' | 'rejected';
-  accessCode?: string;
+  phoneNumber: string; // New: Phone number for OTP login
+  email?: string; // Optional: Keep for backward compatibility
+  // Backward-compatible status values:
+  // - legacy flow: pending/approved/rejected
+  // - phone/otp flow: free/paid/pending_payment
+  status: 'pending' | 'approved' | 'rejected' | 'free' | 'paid' | 'pending_payment';
+  accessLevel?: 'free' | 'premium'; // New (optional for legacy)
+  chaptersAllowed?: number[] | 'all'; // New (optional for legacy): free=[1], paid='all'
+  accessCode?: string; // Optional: Keep for backward compatibility
   deviceFingerprint?: string; // Last device fingerprint that logged in
+  totalPoints?: number; // New: Total points earned
   createdAt: any;
-  approvedAt?: any;
+  paidAt?: any;
   approvedBy?: string;
+  whatsappContacted?: boolean; // New: Whether user contacted via WhatsApp
+}
+
+export interface ChapterPoints {
+  chapterId: string;
+  chapterName: string;
+  points: number; // Points available in this chapter
+  earnedPoints?: number; // Points earned by user
 }

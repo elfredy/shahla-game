@@ -1,12 +1,19 @@
 import { useState } from 'react';
-import { collection, addDoc, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, addDoc, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { db, auth } from '@/lib/firebase';
+import { deviceTracking } from '@/lib/deviceTracking';
+import { authService } from '@/lib/auth';
+import { useRouter } from 'next/router';
 import Link from 'next/link';
 
 export default function Register() {
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -16,47 +23,83 @@ export default function Register() {
       return;
     }
 
+    if (!password || password.length < 6) {
+      setMessage('✗ Şifrə ən azı 6 simvol olmalıdır!');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setMessage('✗ Şifrələr uyğun deyil!');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
 
     try {
-      // Check if email already exists
+      // Check if email already exists in subscriptions
       const subscriptionsRef = collection(db, 'subscriptions');
       const q = query(subscriptionsRef, where('email', '==', email.toLowerCase().trim()));
       const snapshot = await getDocs(q);
 
       if (!snapshot.empty) {
         const existing = snapshot.docs[0].data();
-        if (existing.status === 'approved') {
-          setMessage('Bu email artıq təsdiqlənib. Giriş səhifəsinə keçin.');
-        } else if (existing.status === 'pending') {
-          setMessage('Bu email artıq gözləmədədir. Admin təsdiqini gözləyin.');
+        if (existing.status === 'paid' || existing.status === 'approved') {
+          setMessage('Bu email artıq qeydiyyatdan keçib. Giriş səhifəsinə keçin.');
         } else {
-          setMessage('Bu email ünvanı ilə bağlı bir problem var. Admin ilə əlaqə saxlayın.');
+          setMessage('Bu email artıq gözləmədədir. Admin təsdiqini gözləyin.');
         }
         setLoading(false);
         return;
       }
 
-      // Add new subscription
-      await addDoc(collection(db, 'subscriptions'), {
-        email: email.toLowerCase().trim(),
-        status: 'pending',
-        createdAt: new Date(),
-      });
+      // Create Firebase Auth user
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        email.toLowerCase().trim(),
+        password
+      );
+      const user = userCredential.user;
 
-      setMessage('✓ Email ünvanınız uğurla qeydiyyata alındı! Admin təsdiqindən sonra Access Code alacaqsınız.');
-      setEmail('');
+      // Get device info
+      const deviceInfo = deviceTracking.getDeviceInfo();
+      const currentFingerprint = deviceInfo.deviceFingerprint;
+
+      // Create subscription in Firestore (pending - admin will approve and set to premium)
+      const newSubscription = {
+        email: email.toLowerCase().trim(),
+        status: 'pending_payment', // Admin will change to 'paid' after payment
+        accessLevel: 'free', // Will be upgraded to 'premium' by admin
+        chaptersAllowed: [1], // Free tier initially
+        deviceFingerprint: currentFingerprint,
+        totalPoints: 0,
+        createdAt: new Date(),
+        whatsappContacted: false
+      };
+      
+      await setDoc(doc(db, 'subscriptions', user.uid), newSubscription);
+
+      // Save session
+      authService.saveSession(email.toLowerCase().trim(), '', currentFingerprint);
+
+      setMessage('✓ Qeydiyyat uğurlu! Premium üçün WhatsApp ilə əlaqə saxlayın. Yönləndirilirsiniz...');
+      
+      // Redirect to home page
+      setTimeout(() => {
+        router.push('/');
+      }, 2000);
     } catch (error: any) {
       console.error('Error registering:', error);
-      if (error?.code === 'permission-denied') {
+      if (error?.code === 'auth/email-already-in-use') {
+        setMessage('✗ Bu email artıq istifadə olunur. Giriş səhifəsinə keçin.');
+      } else if (error?.code === 'auth/weak-password') {
+        setMessage('✗ Şifrə çox zəifdir. Daha güclü bir şifrə seçin.');
+      } else if (error?.code === 'permission-denied') {
         setMessage('✗ Xəta baş verdi! Firebase konfigürasyonunu yoxlayın.');
       } else {
         setMessage('✗ Xəta baş verdi! ' + (error?.message || ''));
       }
-    } finally {
       setLoading(false);
-      setTimeout(() => setMessage(''), 8000);
     }
   };
 
@@ -104,15 +147,57 @@ export default function Register() {
               />
             </div>
 
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Şifrə:</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Ən azı 6 simvol"
+                style={styles.input}
+                required
+                disabled={loading}
+                minLength={6}
+              />
+            </div>
+
+            <div style={styles.inputGroup}>
+              <label style={styles.label}>Şifrəni Təsdiqlə:</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Şifrəni təkrar daxil edin"
+                style={styles.input}
+                required
+                disabled={loading}
+                minLength={6}
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
               style={styles.submitButton}
               className="submit-button"
             >
-              {loading ? 'Göndərilir...' : 'Qeydiyyatdan Keç'}
+              {loading ? 'Qeydiyyatdan keçilir...' : 'Qeydiyyatdan Keç'}
             </button>
           </form>
+
+          <div style={styles.whatsappInfo}>
+            <p style={styles.whatsappText}>
+              💎 Premium üçün:{' '}
+              <a
+                href={`https://wa.me/994507772885?text=Merhaba, premium üyelik hakkında bilgi almak istiyorum.`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={styles.whatsappLink}
+              >
+                WhatsApp ilə əlaqə saxlayın
+              </a>
+            </p>
+          </div>
 
           <div style={styles.linkContainer}>
             <p style={styles.linkText}>
@@ -231,5 +316,22 @@ const styles: { [key: string]: React.CSSProperties } = {
     color: '#667eea',
     textDecoration: 'underline',
     fontWeight: '600',
+  },
+  whatsappInfo: {
+    marginTop: '20px',
+    padding: '15px',
+    background: 'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)',
+    borderRadius: '12px',
+    textAlign: 'center',
+  },
+  whatsappText: {
+    fontSize: '14px',
+    color: '#2e7d32',
+    margin: 0,
+  },
+  whatsappLink: {
+    color: '#25D366',
+    textDecoration: 'none',
+    fontWeight: '700',
   },
 };
