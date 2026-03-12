@@ -25,26 +25,38 @@ export default async function handler(
       return res.status(400).json({ translation: '', error: 'Missing text or targetLang' });
     }
 
-    const apiKey = process.env.DEEPL_API_KEY;
-    if (!apiKey) {
+    const rawKey = process.env.DEEPL_API_KEY;
+    if (!rawKey) {
       return res.status(500).json({ translation: '', error: 'DeepL API key not configured' });
     }
+    const apiKey = rawKey.trim().replace(/^["']|["']$/g, '');
 
-    // DeepL API endpoint
-    const apiUrl = 'https://api.deepl.com/v2/translate';
-    
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `DeepL-Auth-Key ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        text: [text],
-        source_lang: 'DE',
-        target_lang: targetLang,
-      }),
-    });
+    // DeepL Free keys end with ":fx" → api-free.deepl.com; Pro → api.deepl.com
+    const freeUrl = 'https://api-free.deepl.com/v2/translate';
+    const proUrl = 'https://api.deepl.com/v2/translate';
+    const isFreeKey = apiKey.endsWith(':fx');
+
+    const doRequest = (url: string) =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `DeepL-Auth-Key ${apiKey}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'ShahlaWordsGame/1.0',
+        },
+        body: JSON.stringify({
+          text: [text],
+          source_lang: 'DE',
+          target_lang: targetLang,
+        }),
+      });
+
+    let response = await doRequest(isFreeKey ? freeUrl : proUrl);
+
+    // If 403 with Pro URL, retry once with Free URL (in case key is Free but :fx was lost)
+    if (!response.ok && response.status === 403 && !isFreeKey) {
+      response = await doRequest(freeUrl);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();
